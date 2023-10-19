@@ -5,25 +5,46 @@ import okio.Okio;
 import okio.Sink;
 import okio.Source;
 import org.newsclub.net.unix.AFUNIXSocket;
+import org.newsclub.net.unix.AFUNIXSocketChannel;
+import org.newsclub.net.unix.AFUNIXSocketPair;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.FileDescriptor;
+import java.io.IOException;
 import java.util.Arrays;
 
 class Copier implements Runnable, Closeable {
     private static final int MAX_READ_SIZE = 32 * 1024;
-    private final AFUNIXSocket src_socket, dest_socket;
+
+    private final Closeable src, dest;
+    private final IOSupplier<FileDescriptor[]> src_fd_supplier;
+    private final IOConsumer<FileDescriptor[]> dest_fd_consumer;
+
+    private final String header_id;
     private final String header;
-    private final InputStream src;
-    private final OutputStream dest;
+
+    private int next_fd_index = 0;
 
 
-    Copier(AFUNIXSocket src, AFUNIXSocket dest, String header) throws IOException {
-        this.src_socket = src;
-        this.dest_socket = dest;
-        this.header = header;
-        this.src = src.getInputStream();
-        this.dest = dest.getOutputStream();
+    Copier(AFUNIXSocket src, AFUNIXSocket dest, boolean direction_ltr, String header_id) {
+        this(src, dest, src::getReceivedFileDescriptors, dest::setOutboundFileDescriptors, direction_ltr, header_id);
     }
+
+    Copier(AFUNIXSocketChannel src, AFUNIXSocketChannel dest, boolean direction_ltr, String header_id) {
+        this(src, dest, src::getReceivedFileDescriptors, dest::setOutboundFileDescriptors, direction_ltr, header_id);
+    }
+
+    private Copier(Closeable src, Closeable dest, IOSupplier<FileDescriptor[]> src_fd_supplier,
+                   IOConsumer<FileDescriptor[]> dest_fd_consumer,
+                   boolean direction_ltr, String header_id) {
+        this.src = src;
+        this.dest = dest;
+        this.src_fd_supplier = src_fd_supplier;
+        this.dest_fd_consumer = dest_fd_consumer;
+        this.header_id = header_id;
+        this.header = (direction_ltr ? "|--> " : "|<-- ") + header_id + ": ";
+    }
+
 
     @Override
     public void run() {
@@ -33,10 +54,24 @@ class Copier implements Runnable, Closeable {
 
             long read;
             while((read = source.read(buffer, MAX_READ_SIZE)) >= 0) {
-                FileDescriptor[] descriptors = src_socket.getReceivedFileDescriptors();
+                FileDescriptor[] descriptors = src_fd_supplier.get();
                 if (descriptors != null && descriptors.length != 0) {
                     System.out.println(header + ": " + Arrays.toString(descriptors));
-                    dest_socket.setOutboundFileDescriptors(descriptors);
+
+                    for(int i = 0; i < descriptors.length; i++) {
+                        int fd_id = next_fd_index++;
+
+                        AFUNIXSocketPair<AFUNIXSocketChannel> pair = AFUNIXSocketPair.open();
+                        AFUNIXSocketChannel out_local = pair.getSocket1();
+                        AFUNIXSocketChannel out_remote = pair.getSocket2();
+
+                        Thread.ofVirtual().start(
+                            new Copier(out_local, out_remote, true, header_id + " (FD " + fd_id + ")"));
+                        Thread.ofVirtual().start(
+                            new Copier(out_remote, out_local, false, header_id + " (FD " + fd_id + ")"));
+                    }
+
+                    dest_fd_consumer.consume(descriptors);
                 }
 
                 if (read == 0) {
@@ -57,8 +92,6 @@ class Copier implements Runnable, Closeable {
     public void close() {
         closeBlindly(src);
         closeBlindly(dest);
-        closeBlindly(src_socket);
-        closeBlindly(dest_socket);
     }
 
     static void closeBlindly(Closeable c) {
@@ -70,5 +103,14 @@ class Copier implements Runnable, Closeable {
         catch(IOException ex) {
             // ignore
         }
+    }
+
+
+    interface IOSupplier<T> {
+        T get() throws IOException;
+    }
+
+    interface IOConsumer<T> {
+        void consume(T value) throws IOException;
     }
 }

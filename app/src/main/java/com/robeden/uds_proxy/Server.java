@@ -20,6 +20,8 @@ class Server implements Runnable {
     @Override
     public void run() {
         System.out.println("Server listening...");
+
+        int next_socket_id = 0;
         while(true) {
             AFUNIXSocket socket_in;
             try {
@@ -32,9 +34,7 @@ class Server implements Runnable {
             }
             socket_in.setAncillaryReceiveBufferSize(1024);
 
-            String socket_id = socket_in.toString().substring(
-                socket_in.toString().indexOf("@") + 1,
-                socket_in.toString().indexOf("["));
+            String socket_id = String.valueOf(next_socket_id++);
             System.out.println("New connection: " + socket_id);
 
             AFUNIXSocket socket_out;
@@ -42,8 +42,8 @@ class Server implements Runnable {
             Copier copier2 = null;
             try {
                 socket_out = AFUNIXSocket.connectTo(destination);
-                copier1 = new Copier(socket_in, socket_out, "|--> " + socket_id);
-                copier2 = new Copier(socket_out, socket_in, "|<-- " + socket_id);
+                copier1 = new Copier(socket_in, socket_out, true, socket_id);
+                copier2 = new Copier(socket_out, socket_in, false, socket_id);
             }
             catch (IOException e) {
                 Copier.closeBlindly(copier1);
