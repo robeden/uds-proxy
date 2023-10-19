@@ -3,6 +3,7 @@
  */
 package com.robeden.uds_proxy;
 
+import org.newsclub.net.unix.AFUNIXServerSocket;
 import picocli.CommandLine;
 
 import java.nio.file.Files;
@@ -25,11 +26,11 @@ public class App implements Callable<Integer> {
         description = "Location for proxy socket file")
     public void setProxy(Path value) {
         proxy = value;
-        if (Files.exists(value)) {
-            throw new ParameterException(spec.commandLine(),
-                String.format("Invalid value '%s' for 'proxy' parameter: " +
-                    "file already exists", value));
-        }
+//        if (Files.exists(value)) {
+//            throw new ParameterException(spec.commandLine(),
+//                String.format("Invalid value '%s' for 'proxy' parameter: " +
+//                    "file already exists", value));
+//        }
     }
 
     @Parameters(
@@ -48,6 +49,10 @@ public class App implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
+        AFUNIXServerSocket server = AFUNIXServerSocket.bindOn(proxy, true);
+//        server.setReceiveBufferSize(1024);
+        var thread = Server.start(server, destination);
+        thread.join();
         return 0;
     }
 

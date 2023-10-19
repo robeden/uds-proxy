@@ -5,7 +5,6 @@ import org.newsclub.net.unix.AFUNIXSocket;
 import org.newsclub.net.unix.AFUNIXSocketAddress;
 
 import java.io.IOException;
-import java.net.Socket;
 import java.net.SocketException;
 import java.nio.file.Path;
 
@@ -20,23 +19,31 @@ class Server implements Runnable {
 
     @Override
     public void run() {
+        System.out.println("Server listening...");
         while(true) {
-            Socket socket_in;
+            AFUNIXSocket socket_in;
             try {
                 socket_in = server.accept();
+                System.out.println("Got connection: " + socket_in);
             }
             catch (IOException e) {
                 System.out.println("Server stopping: " + e.getMessage());
                 return;
             }
+            socket_in.setAncillaryReceiveBufferSize(1024);
+
+            String socket_id = socket_in.toString().substring(
+                socket_in.toString().indexOf("@") + 1,
+                socket_in.toString().indexOf("["));
+            System.out.println("New connection: " + socket_id);
 
             AFUNIXSocket socket_out;
             Copier copier1 = null;
             Copier copier2 = null;
             try {
                 socket_out = AFUNIXSocket.connectTo(destination);
-                copier1 = new Copier(socket_out, socket_in, "|<-- " + socket_in);
-                copier2 = new Copier(socket_in, socket_out, "|--> " + socket_in);
+                copier1 = new Copier(socket_in, socket_out, "|--> " + socket_id);
+                copier2 = new Copier(socket_out, socket_in, "|<-- " + socket_id);
             }
             catch (IOException e) {
                 Copier.closeBlindly(copier1);
