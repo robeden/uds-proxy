@@ -50,7 +50,7 @@ class Server implements Runnable {
     }
 
 
-    static Thread start(AFUNIXServerSocket server) {
-        return Thread.ofVirtual().name("Server").start(new Server(server));
+    static Thread start(AFUNIXServerSocket server, Path destination) throws Exception {
+        return Thread.ofVirtual().name("Server").start(new Server(server, destination));
     }
 }
